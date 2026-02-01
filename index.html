@@ -6,20 +6,29 @@
     <title>Survival Farm Prototype</title>
     <style>
         body { margin: 0; padding: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Courier New', Courier, monospace; }
-        #ui-layer { position: absolute; top: 10px; left: 10px; color: #00ff00; pointer-events: none; text-shadow: 2px 2px #000; }
+        #ui-layer { position: absolute; top: 5px; left: 5px; color: #00ff00; pointer-events: none; text-shadow: 1px 1px #000; }
         canvas { display: block; background: #2d4c1e; }
         .debug-msg { position: absolute; bottom: 10px; left: 10px; color: white; font-size: 10px; opacity: 0.5; }
         
         /* Controles Móviles */
         .mobile-controls { display: none; }
-        #joystick-area { position: absolute; bottom: 20px; left: 20px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 3px solid rgba(255,255,255,0.3); }
-        #joystick-knob { position: absolute; width: 50px; height: 50px; background: rgba(0,255,102,0.6); border-radius: 50%; border: 2px solid #00ff66; left: 35px; top: 35px; }
+        #joystick-area { position: absolute; bottom: 10px; left: 10px; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); }
+        #joystick-knob { position: absolute; width: 35px; height: 35px; background: rgba(0,255,102,0.6); border-radius: 50%; border: 2px solid #00ff66; left: 22.5px; top: 22.5px; }
         
-        .plant-buttons { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 15px; }
-        .plant-btn { width: 70px; height: 70px; border-radius: 10px; border: 3px solid #000; font-size: 12px; font-weight: bold; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .plant-buttons { position: absolute; bottom: 10px; right: 10px; display: flex; flex-direction: column; gap: 8px; }
+        .plant-btn { width: 50px; height: 50px; border-radius: 8px; border: 2px solid #000; font-size: 10px; font-weight: bold; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .plant-btn.attacker { background: #00ff66; color: #000; }
         .plant-btn.generator { background: #00ccff; color: #000; }
         .plant-btn:active { transform: scale(0.95); }
+        
+        /* UI más pequeña en móvil */
+        @media (max-width: 768px) {
+            #ui-layer { font-size: 0.7em; }
+            #ui-layer h1 { font-size: 1em; margin: 0; }
+            #ui-layer p { margin: 1px 0; }
+            #controls-hint { display: none; }
+            .debug-msg { display: none; }
+        }
     </style>
 </head>
 <body>
@@ -42,20 +51,20 @@
         </div>
         <div class="plant-buttons">
             <button class="plant-btn attacker" id="btn-attacker">
-                <span>🌿</span>
-                <span>$20</span>
+                <span style="font-size: 16px;">🌿</span>
+                <span style="font-size: 9px;">$20</span>
             </button>
             <button class="plant-btn generator" id="btn-generator">
-                <span>💰</span>
-                <span>$50</span>
+                <span style="font-size: 16px;">💰</span>
+                <span style="font-size: 9px;">$50</span>
             </button>
         </div>
     </div>
 
-    <div id="game-over-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); color: white; flex-direction: column; justify-content: center; align-items: center; z-index: 100;">
-        <h1 id="win-loss-title" style="font-size: 4em; color: #ff3333; margin-bottom: 20px;">GAME OVER</h1>
-        <p id="win-loss-msg" style="font-size: 1.5em; margin-bottom: 30px;">Tu jardín ha caído...</p>
-        <button id="action-btn" onclick="resetGame()" style="padding: 15px 40px; font-size: 1.2em; cursor: pointer; background: #00ff66; border: none; border-radius: 5px; font-family: inherit; font-weight: bold;">REINTENTAR</button>
+    <div id="game-over-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); color: white; flex-direction: column; justify-content: center; align-items: center; z-index: 100;">
+        <h1 id="win-loss-title" style="font-size: 3em; color: #ff3333; margin-bottom: 15px;">GAME OVER</h1>
+        <p id="win-loss-msg" style="font-size: 1.2em; margin-bottom: 25px;">Tu jardín ha caído...</p>
+        <button id="action-btn" onclick="resetGame()" style="padding: 12px 35px; font-size: 1.1em; cursor: pointer; background: #00ff66; border: none; border-radius: 5px; font-family: inherit; font-weight: bold;">REINTENTAR</button>
     </div>
 
 <script>
@@ -146,22 +155,23 @@
             const x = touch.clientX - rect.left - centerX;
             const y = touch.clientY - rect.top - centerY;
             
-            const distance = Math.min(35, Math.hypot(x, y));
+            const maxDistance = 22.5;
+            const distance = Math.min(maxDistance, Math.hypot(x, y));
             const angle = Math.atan2(y, x);
             
-            joystick.dx = Math.cos(angle) * (distance / 35);
-            joystick.dy = Math.sin(angle) * (distance / 35);
+            joystick.dx = Math.cos(angle) * (distance / maxDistance);
+            joystick.dy = Math.sin(angle) * (distance / maxDistance);
             
-            joystickKnob.style.left = (35 + Math.cos(angle) * distance) + 'px';
-            joystickKnob.style.top = (35 + Math.sin(angle) * distance) + 'px';
+            joystickKnob.style.left = (22.5 + Math.cos(angle) * distance) + 'px';
+            joystickKnob.style.top = (22.5 + Math.sin(angle) * distance) + 'px';
         });
 
         joystickArea.addEventListener('touchend', () => {
             joystick.active = false;
             joystick.dx = 0;
             joystick.dy = 0;
-            joystickKnob.style.left = '35px';
-            joystickKnob.style.top = '35px';
+            joystickKnob.style.left = '22.5px';
+            joystickKnob.style.top = '22.5px';
         });
 
         // Botones de plantas
