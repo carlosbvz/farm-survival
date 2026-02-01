@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survival Farm Prototype</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Courier New', Courier, monospace; }
+        #ui-layer { position: absolute; top: 10px; left: 10px; color: #00ff00; pointer-events: none; text-shadow: 2px 2px #000; }
+        canvas { display: block; background: #2d4c1e; }
+        .debug-msg { position: absolute; bottom: 10px; left: 10px; color: white; font-size: 10px; opacity: 0.5; }
+        
+        /* Controles Móviles */
+        .mobile-controls { display: none; }
+        #joystick-area { position: absolute; bottom: 20px; left: 20px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 3px solid rgba(255,255,255,0.3); }
+        #joystick-knob { position: absolute; width: 50px; height: 50px; background: rgba(0,255,102,0.6); border-radius: 50%; border: 2px solid #00ff66; left: 35px; top: 35px; }
+        
+        .plant-buttons { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .plant-btn { width: 70px; height: 70px; border-radius: 10px; border: 3px solid #000; font-size: 12px; font-weight: bold; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .plant-btn.attacker { background: #00ff66; color: #000; }
+        .plant-btn.generator { background: #00ccff; color: #000; }
+        .plant-btn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <h1>FARM SURVIVAL v2.0</h1>
+    <p>NIVEL: <span id="level">1</span>/8 | OLEADA: <span id="wave">1</span>/10</p>
+    <p>ORO: $<span id="gold">100</span> | VIDA: <span id="health">100</span>%</p>
+    <p id="controls-hint" style="font-size: 0.8em;">[Click Izq: Atacante ($20) | Click Der: Generadora ($50) | Flechas: Mover]</p>
+</div>
+
+<div class="debug-msg">Estado: <span id="status">Iniciando...</span> | <span id="gen-info">Generadoras producen oro cada 6s</span></div>
+
+    <canvas id="game"></canvas>
+
+    <!-- Controles Móviles -->
+    <div class="mobile-controls">
+        <div id="joystick-area">
+            <div id="joystick-knob"></div>
+        </div>
+        <div class="plant-buttons">
+            <button class="plant-btn attacker" id="btn-attacker">
+                <span>🌿</span>
+                <span>$20</span>
+            </button>
+            <button class="plant-btn generator" id="btn-generator">
+                <span>💰</span>
+                <span>$50</span>
+            </button>
+        </div>
+    </div>
+
+    <div id="game-over-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); color: white; flex-direction: column; justify-content: center; align-items: center; z-index: 100;">
+        <h1 id="win-loss-title" style="font-size: 4em; color: #ff3333; margin-bottom: 20px;">GAME OVER</h1>
+        <p id="win-loss-msg" style="font-size: 1.5em; margin-bottom: 30px;">Tu jardín ha caído...</p>
+        <button id="action-btn" onclick="resetGame()" style="padding: 15px 40px; font-size: 1.2em; cursor: pointer; background: #00ff66; border: none; border-radius: 5px; font-family: inherit; font-weight: bold;">REINTENTAR</button>
+    </div>
+
+<script>
+
+
+
+    const initLevel = 1;
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const statusTxt = document.getElementById('status');
+    const goldTxt = document.getElementById('gold');
+    const healthTxt = document.getElementById('health');
+    const levelTxt = document.getElementById('level');
+    const waveTxt = document.getElementById('wave');
+    const gameOverOverlay = document.getElementById('game-over-overlay');
+    const winLossTitle = document.getElementById('win-loss-title');
+    const winLossMsg = document.getElementById('win-loss-msg');
+    const actionBtn = document.getElementById('action-btn');
+
+    // Detectar si es móvil
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                     ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    
+    if (isMobile) {
+        document.querySelectorAll('.mobile-controls').forEach(el => el.style.display = 'block');
+        document.getElementById('controls-hint').innerText = '[Joystick: Mover | Botones: Plantar]';
+    }
+
+    // Ajuste de pantalla dinámico
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Estado del Juego
+    let state = {
+        gold: 100,
+        health: 100,
+        player: { x: canvas.width/2, y: canvas.height/2, speed: 5, size: 25, baseSpeed: 5, speedBoostUntil: 0 },
+        plants: [],
+        enemies: [],
+        projectiles: [],
+        enemyProjectiles: [],
+        tokens: [],
+        keys: {},
+        isGameOver: false,
+        level: initLevel,
+        wave: 1,
+        enemiesInWave: 6 + (initLevel * 5),
+        enemiesSpawned: 0,
+        enemiesKilled: 0,
+        isBossLevel: false,
+        isWinState: false
+    };
+
+    // Input de teclado
+    window.addEventListener('keydown', e => state.keys[e.code] = true);
+    window.addEventListener('keyup', e => state.keys[e.code] = false);
+    
+    // Prevenir menú contextual en click derecho
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Joystick para móvil
+    let joystick = { active: false, dx: 0, dy: 0 };
+    
+    if (isMobile) {
+        const joystickArea = document.getElementById('joystick-area');
+        const joystickKnob = document.getElementById('joystick-knob');
+        const btnAttacker = document.getElementById('btn-attacker');
+        const btnGenerator = document.getElementById('btn-generator');
+
+        // Joystick touch events
+        joystickArea.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            joystick.active = true;
+        });
+
+        joystickArea.addEventListener('touchmove', (e) => {
+            if (!joystick.active) return;
+            e.preventDefault();
+            
+            const rect = joystickArea.getBoundingClientRect();
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left - centerX;
+            const y = touch.clientY - rect.top - centerY;
+            
+            const distance = Math.min(35, Math.hypot(x, y));
+            const angle = Math.atan2(y, x);
+            
+            joystick.dx = Math.cos(angle) * (distance / 35);
+            joystick.dy = Math.sin(angle) * (distance / 35);
+            
+            joystickKnob.style.left = (35 + Math.cos(angle) * distance) + 'px';
+            joystickKnob.style.top = (35 + Math.sin(angle) * distance) + 'px';
+        });
+
+        joystickArea.addEventListener('touchend', () => {
+            joystick.active = false;
+            joystick.dx = 0;
+            joystick.dy = 0;
+            joystickKnob.style.left = '35px';
+            joystickKnob.style.top = '35px';
+        });
+
+        // Botones de plantas
+        btnAttacker.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (state.gold >= 20 && !state.isGameOver) {
+                state.plants.push({ 
+                    x: state.player.x,
+                    y: state.player.y,
+                    type: 'attacker',
+                    lastShot: 0, 
+                    range: 200,
+                    color: '#00ff66'
+                });
+                state.gold -= 20;
+                updateUI();
+            }
+        });
+
+        btnGenerator.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (state.gold >= 50 && !state.isGameOver) {
+                state.plants.push({ 
+                    x: state.player.x,
+                    y: state.player.y,
+                    type: 'generator',
+                    lastProduced: Date.now(),
+                    productionRate: 6000,
+                    value: 5,
+                    color: '#00ccff'
+                });
+                state.gold -= 50;
+                updateUI();
+            }
+        });
+    }
+
+    // Eventos de mouse solo para desktop
+    if (!isMobile) {
+        canvas.addEventListener('mousedown', e => {
+            if (e.button === 0) { // Click Izquierdo: Atacante
+                if (state.gold >= 20) {
+                    state.plants.push({ 
+                        x: state.player.x,
+                        y: state.player.y,
+                        type: 'attacker',
+                        lastShot: 0, 
+                        range: 200,
+                        color: '#00ff66'
+                    });
+                    state.gold -= 20;
+                    updateUI();
+                }
+            } else if (e.button === 2) { // Click Derecho: Generadora
+                if (state.gold >= 50) {
+                    state.plants.push({ 
+                        x: state.player.x,
+                        y: state.player.y,
+                        type: 'generator',
+                        lastProduced: Date.now(),
+                        productionRate: 6000,
+                        value: 5,
+                        color: '#00ccff'
+                    });
+                    state.gold -= 50;
+                    updateUI();
+                }
+            }
+        });
+    }
+
+    function updateUI() {
+        goldTxt.innerText = state.gold;
+        healthTxt.innerText = state.health;
+        levelTxt.innerText = state.level;
+        waveTxt.innerText = state.wave;
+        
+        if (state.health <= 0 && !state.isGameOver) {
+            state.health = 0;
+            healthTxt.innerText = "0";
+            statusTxt.innerText = "GAME OVER";
+            statusTxt.style.color = "red";
+            winLossTitle.innerText = "GAME OVER";
+            winLossTitle.style.color = "#ff3333";
+            winLossMsg.innerText = "Tu jardín ha caído...";
+            actionBtn.innerText = "REINTENTAR";
+            actionBtn.onclick = resetGame;
+            gameOverOverlay.style.display = "flex";
+            state.isGameOver = true;
+        }
+    }
+
+    function checkWaveProgress() {
+        if (state.enemiesKilled >= state.enemiesInWave && state.enemies.length === 0) {
+            if (state.wave < 10) {
+                // Siguiente oleada
+                state.wave++;
+                state.enemiesSpawned = 0;
+                state.enemiesKilled = 0;
+                state.enemiesInWave = 6 + (state.wave * 2) + (state.level * 3);
+                statusTxt.innerText = "Oleada " + state.wave;
+                updateSpawnRate(); // Actualizar frecuencia al cambiar oleada
+            } else {
+                // Nivel completado
+                showWinScreen();
+            }
+        }
+    }
+
+    function showWinScreen() {
+        state.isGameOver = true;
+        winLossTitle.innerText = "¡NIVEL COMPLETADO!";
+        winLossTitle.style.color = "#00ff66";
+        winLossMsg.innerText = "Has sobrevivido al Nivel " + state.level;
+        actionBtn.innerText = state.level < 8 ? "SIGUIENTE NIVEL" : "¡VICTORIA TOTAL!";
+        actionBtn.onclick = state.level < 8 ? nextLevel : resetGame;
+        gameOverOverlay.style.display = "flex";
+    }
+
+    function nextLevel() {
+        state.level++;
+        state.wave = 1;
+        state.enemiesInWave = 6 + (state.level * 5);
+        state.enemiesSpawned = 0;
+        state.enemiesKilled = 0;
+        state.isGameOver = false;
+        state.health = 100;
+        state.plants = [];
+        state.enemies = [];
+        state.projectiles = [];
+        state.enemyProjectiles = [];
+        state.tokens = [];
+        state.player.speed = state.player.baseSpeed;
+        state.player.speedBoostUntil = 0;
+        updateSpawnRate();
+        gameOverOverlay.style.display = "none";
+        updateUI();
+    }
+
+    function resetGame() {
+        state = {
+            gold: 100,
+            health: 100,
+            player: { x: canvas.width/2, y: canvas.height/2, speed: 5, size: 25, baseSpeed: 5, speedBoostUntil: 0 },
+            plants: [],
+            enemies: [],
+            projectiles: [],
+            enemyProjectiles: [],
+            tokens: [],
+            keys: {},
+            isGameOver: false,
+            level: initLevel,
+            wave: 1,
+            enemiesInWave: 6 + (initLevel * 5),
+            enemiesSpawned: 0,
+            enemiesKilled: 0
+        };
+        gameOverOverlay.style.display = "none";
+        statusTxt.style.color = "white";
+        updateSpawnRate();
+        updateUI();
+    }
+
+    function spawnEnemy() {
+        if (state.isGameOver) return;
+        if (state.enemiesSpawned >= state.enemiesInWave) return;
+
+        const dist = 600;
+        const angle = Math.random() * Math.PI * 2;
+        
+        // Jefe final en la oleada 10
+        const isBoss = state.wave === 10 && state.enemiesSpawned === state.enemiesInWave - 1;
+        
+        // Nuevo enemigo paralizador en nivel 2+
+        const isStunner = !isBoss && state.level >= 2 && Math.random() < 0.2;
+        
+        // Nuevo enemigo destructor en nivel 3+
+        const isDestroyer = !isBoss && state.level >= 3 && !isStunner && Math.random() < 0.15;
+        
+        // Nuevo enemigo tirador en nivel 4+
+        const isShooter = !isBoss && state.level >= 4 && !isStunner && !isDestroyer && Math.random() < 0.15;
+
+        // Dificultad progresiva: vida aumenta con nivel y oleada
+        const hpMultiplier = 1 + (state.level * 0.5) + (state.wave * 0.2);
+        
+        state.enemies.push({
+            x: state.player.x + Math.cos(angle) * dist,
+            y: state.player.y + Math.sin(angle) * dist,
+            hp: isBoss ? (50 * state.level) : Math.floor(2 * hpMultiplier),
+            speed: isBoss ? 0.8 : (1.5 + Math.random() + (state.level * 0.1)),
+            isBoss: isBoss,
+            isStunner: isStunner,
+            isDestroyer: isDestroyer,
+            isShooter: isShooter,
+            lastShot: Date.now(),
+            size: isBoss ? 60 : 20
+        });
+        
+        state.enemiesSpawned++;
+
+        // Spawn de Token de Velocidad
+        if (Math.random() < 0.05) {
+            state.tokens.push({
+                x: Math.random() * (canvas.width - 100) + 50,
+                y: Math.random() * (canvas.height - 100) + 50,
+                type: 'speed',
+                size: 15,
+                color: '#00ffff'
+            });
+        }
+
+        // Frecuencia dinámica: spawn múltiple en niveles/oleadas altas
+        const extraSpawnChance = (state.level * 0.1) + (state.wave * 0.05);
+        if (Math.random() < extraSpawnChance && state.enemiesSpawned < state.enemiesInWave && !isBoss) {
+            const angle2 = Math.random() * Math.PI * 2;
+            const isStunner2 = state.level >= 2 && Math.random() < 0.2;
+            const isDestroyer2 = state.level >= 3 && !isStunner2 && Math.random() < 0.15;
+            const isShooter2 = state.level >= 4 && !isStunner2 && !isDestroyer2 && Math.random() < 0.15;
+            
+            state.enemies.push({
+                x: state.player.x + Math.cos(angle2) * dist,
+                y: state.player.y + Math.sin(angle2) * dist,
+                hp: Math.floor(2 * hpMultiplier),
+                speed: (1.5 + Math.random() + (state.level * 0.1)),
+                isBoss: false,
+                isStunner: isStunner2,
+                isDestroyer: isDestroyer2,
+                isShooter: isShooter2,
+                lastShot: Date.now(),
+                size: 20
+            });
+            state.enemiesSpawned++;
+        }
+    }
+
+    function loop() {
+        if (state.isGameOver) {
+            requestAnimationFrame(loop);
+            return;
+        }
+
+        // Actualizar Boost de Velocidad
+        if (state.player.speedBoostUntil && Date.now() > state.player.speedBoostUntil) {
+            state.player.speed = state.player.baseSpeed;
+            state.player.speedBoostUntil = 0;
+        }
+
+        // Fondo (Pasto)
+        ctx.fillStyle = '#3a5a40';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Movimiento Jugador
+        if (isMobile && joystick.active) {
+            state.player.x += joystick.dx * state.player.speed;
+            state.player.y += joystick.dy * state.player.speed;
+        } else {
+            if (state.keys['ArrowUp']) state.player.y -= state.player.speed;
+            if (state.keys['ArrowDown']) state.player.y += state.player.speed;
+            if (state.keys['ArrowLeft']) state.player.x -= state.player.speed;
+            if (state.keys['ArrowRight']) state.player.x += state.player.speed;
+        }
+
+        // Dibujar Tokens
+        for (let i = state.tokens.length - 1; i >= 0; i--) {
+            let t = state.tokens[i];
+            ctx.fillStyle = t.color;
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            
+            // Dibujar rayo (lightning bolt)
+            ctx.beginPath();
+            ctx.moveTo(t.x, t.y - 15);
+            ctx.lineTo(t.x + 5, t.y - 5);
+            ctx.lineTo(t.x + 2, t.y);
+            ctx.lineTo(t.x + 8, t.y + 5);
+            ctx.lineTo(t.x, t.y + 15);
+            ctx.lineTo(t.x - 3, t.y + 5);
+            ctx.lineTo(t.x - 2, t.y);
+            ctx.lineTo(t.x - 5, t.y - 5);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            
+            if (Math.hypot(state.player.x - t.x, state.player.y - t.y) < 30) {
+                if (t.type === 'speed') {
+                    state.player.speed = state.player.baseSpeed * 2;
+                    state.player.speedBoostUntil = Date.now() + 20000;
+                }
+                state.tokens.splice(i, 1);
+            }
+        }
+
+        // Dibujar Jugador (Estilo Roblox)
+        ctx.fillStyle = state.player.speedBoostUntil ? '#00ffff' : '#ffcc00';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(state.player.x - 12, state.player.y - 12, 24, 24);
+        ctx.fillRect(state.player.x - 12, state.player.y - 12, 24, 24);
+
+        // Actualizar Plantas
+        state.plants.forEach(p => {
+            let now = Date.now();
+            let isStunned = p.stunUntil && now < p.stunUntil;
+
+            ctx.fillStyle = isStunned ? '#888888' : p.color; // Gris si está paralizada
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 15, 0, Math.PI*2);
+            ctx.fill();
+            ctx.stroke();
+
+            if (isStunned) return; // No hace nada si está paralizada
+
+            if (p.type === 'attacker') {
+                // Lógica de Disparo
+                if (now - p.lastShot > 800) {
+                    let target = state.enemies.find(en => Math.hypot(en.x - p.x, en.y - p.y) < p.range);
+                    if (target) {
+                        state.projectiles.push({ x: p.x, y: p.y, tx: target.x, ty: target.y, age: 0 });
+                        p.lastShot = now;
+                    }
+                }
+            } else if (p.type === 'generator') {
+                // Lógica de Producción de Oro
+                if (now - p.lastProduced > p.productionRate) {
+                    state.gold += p.value;
+                    p.lastProduced = now;
+                    updateUI();
+                    
+                    // Efecto visual simple de producción
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillText("+$" + p.value, p.x - 10, p.y - 20);
+                }
+            }
+        });
+
+        // Actualizar Enemigos (persiguen al jugador)
+        for (let i = state.enemies.length - 1; i >= 0; i--) {
+            let en = state.enemies[i];
+            let angle = Math.atan2(state.player.y - en.y, state.player.x - en.x);
+            en.x += Math.cos(angle) * en.speed;
+            en.y += Math.sin(angle) * en.speed;
+
+            // Disparo del Tirador
+            if (en.isShooter && Date.now() - en.lastShot > 10000) {
+                state.enemyProjectiles.push({
+                    x: en.x,
+                    y: en.y,
+                    tx: state.player.x,
+                    ty: state.player.y,
+                    speed: 4,
+                    age: 0
+                });
+                en.lastShot = Date.now();
+            }
+
+            // Colisión con el jugador
+            let distToPlayer = Math.hypot(state.player.x - en.x, state.player.y - en.y);
+            if (distToPlayer < 20 && state.health > 0) {
+                state.health -= 10;
+                state.enemies.splice(i, 1);
+                state.enemiesKilled++;
+                updateUI();
+                checkWaveProgress();
+                continue; 
+            }
+
+            ctx.fillStyle = en.isBoss ? '#880000' : (en.isStunner ? '#ff8800' : (en.isDestroyer ? '#5D4037' : (en.isShooter ? '#9C27B0' : '#ff3333')));
+            ctx.fillRect(en.x - en.size/2, en.y - en.size/2, en.size, en.size);
+            ctx.strokeRect(en.x - en.size/2, en.y - en.size/2, en.size, en.size);
+
+            // Colisión con plantas (para el paralizador y destructor)
+            if (en.isStunner || en.isDestroyer) {
+                for (let pIdx = state.plants.length - 1; pIdx >= 0; pIdx--) {
+                    let p = state.plants[pIdx];
+                    if (Math.hypot(p.x - en.x, p.y - en.y) < 25) {
+                        if (en.isStunner) {
+                            p.stunUntil = Date.now() + 15000; // Paralizar por 15 segundos
+                        } else if (en.isDestroyer) {
+                            state.plants.splice(pIdx, 1); // Eliminar la planta
+                            // El enemigo destructor también desaparece al cumplir su objetivo
+                            state.enemies.splice(i, 1);
+                            state.enemiesKilled++;
+                            checkWaveProgress();
+                            break; 
+                        }
+                    }
+                }
+            }
+            
+            // Vida del Jefe
+            if (en.isBoss) {
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.fillText("BOSS", en.x - 15, en.y - 30);
+            }
+        }
+
+        // Actualizar Proyectiles Enemigos
+        for (let i = state.enemyProjectiles.length - 1; i >= 0; i--) {
+            let pr = state.enemyProjectiles[i];
+            let angle = Math.atan2(pr.ty - pr.y, pr.tx - pr.x);
+            pr.x += Math.cos(angle) * pr.speed;
+            pr.y += Math.sin(angle) * pr.speed;
+            pr.age++;
+
+            ctx.fillStyle = '#ff00ff';
+            ctx.beginPath();
+            ctx.arc(pr.x, pr.y, 5, 0, Math.PI*2);
+            ctx.fill();
+
+            if (Math.hypot(pr.x - state.player.x, pr.y - state.player.y) < 20) {
+                state.health -= 5;
+                state.enemyProjectiles.splice(i, 1);
+                updateUI();
+            } else if (pr.age > 200) {
+                state.enemyProjectiles.splice(i, 1);
+            }
+        }
+
+        // Actualizar Proyectiles
+        for (let i = state.projectiles.length - 1; i >= 0; i--) {
+            let pr = state.projectiles[i];
+            let angle = Math.atan2(pr.ty - pr.y, pr.tx - pr.x);
+            pr.x += Math.cos(angle) * 10;
+            pr.y += Math.sin(angle) * 10;
+            pr.age++;
+
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            ctx.arc(pr.x, pr.y, 4, 0, Math.PI*2);
+            ctx.fill();
+
+            // Colisiones
+            state.enemies.forEach((en, eIdx) => {
+                if (Math.hypot(pr.x - en.x, pr.y - en.y) < en.size) {
+                    en.hp--;
+                    state.projectiles.splice(i, 1);
+                    if (en.hp <= 0) {
+                        state.enemies.splice(eIdx, 1);
+                        state.enemiesKilled++;
+                        state.gold += en.isBoss ? 50 : 5; // Boss da 50, enemigo normal da 5 (antes 1)
+                        updateUI();
+                        checkWaveProgress();
+                    }
+                }
+            });
+
+            if (pr.age > 100) state.projectiles.splice(i, 1);
+        }
+
+        statusTxt.innerText = "Corriendo";
+        requestAnimationFrame(loop);
+    }
+
+    // Inicio
+    let spawnInterval = setInterval(spawnEnemy, 1500);
+    
+    // Ajustar frecuencia de spawn según nivel/oleada
+    function updateSpawnRate() {
+        clearInterval(spawnInterval);
+        const newRate = Math.max(300, 1500 - (state.level * 100) - (state.wave * 50));
+        spawnInterval = setInterval(spawnEnemy, newRate);
+    }
+
+    updateSpawnRate();
+    loop();
+</script>
+</body>
+</html>
