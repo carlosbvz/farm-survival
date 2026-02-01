@@ -88,6 +88,9 @@
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
                      ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     
+    // Factor de escala para móvil
+    const scale = isMobile ? 0.6 : 1;
+    
     if (isMobile) {
         document.querySelectorAll('.mobile-controls').forEach(el => el.style.display = 'block');
         document.getElementById('controls-hint').innerText = '[Joystick: Mover | Botones: Plantar]';
@@ -439,23 +442,24 @@
             let t = state.tokens[i];
             ctx.fillStyle = t.color;
             ctx.strokeStyle = '#000';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2 * scale;
             
-            // Dibujar rayo (lightning bolt)
+            // Dibujar rayo (lightning bolt) con escala
+            const s = scale;
             ctx.beginPath();
-            ctx.moveTo(t.x, t.y - 15);
-            ctx.lineTo(t.x + 5, t.y - 5);
-            ctx.lineTo(t.x + 2, t.y);
-            ctx.lineTo(t.x + 8, t.y + 5);
-            ctx.lineTo(t.x, t.y + 15);
-            ctx.lineTo(t.x - 3, t.y + 5);
-            ctx.lineTo(t.x - 2, t.y);
-            ctx.lineTo(t.x - 5, t.y - 5);
+            ctx.moveTo(t.x, t.y - 15*s);
+            ctx.lineTo(t.x + 5*s, t.y - 5*s);
+            ctx.lineTo(t.x + 2*s, t.y);
+            ctx.lineTo(t.x + 8*s, t.y + 5*s);
+            ctx.lineTo(t.x, t.y + 15*s);
+            ctx.lineTo(t.x - 3*s, t.y + 5*s);
+            ctx.lineTo(t.x - 2*s, t.y);
+            ctx.lineTo(t.x - 5*s, t.y - 5*s);
             ctx.closePath();
             ctx.fill();
             ctx.stroke();
             
-            if (Math.hypot(state.player.x - t.x, state.player.y - t.y) < 30) {
+            if (Math.hypot(state.player.x - t.x, state.player.y - t.y) < (30 * scale)) {
                 if (t.type === 'speed') {
                     state.player.speed = state.player.baseSpeed * 2;
                     state.player.speedBoostUntil = Date.now() + 20000;
@@ -465,20 +469,22 @@
         }
 
         // Dibujar Jugador (Estilo Roblox)
+        const playerSize = 24 * scale;
         ctx.fillStyle = state.player.speedBoostUntil ? '#00ffff' : '#ffcc00';
         ctx.strokeStyle = '#000';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(state.player.x - 12, state.player.y - 12, 24, 24);
-        ctx.fillRect(state.player.x - 12, state.player.y - 12, 24, 24);
+        ctx.lineWidth = 3 * scale;
+        ctx.strokeRect(state.player.x - playerSize/2, state.player.y - playerSize/2, playerSize, playerSize);
+        ctx.fillRect(state.player.x - playerSize/2, state.player.y - playerSize/2, playerSize, playerSize);
 
         // Actualizar Plantas
         state.plants.forEach(p => {
             let now = Date.now();
             let isStunned = p.stunUntil && now < p.stunUntil;
 
+            const plantSize = 15 * scale;
             ctx.fillStyle = isStunned ? '#888888' : p.color; // Gris si está paralizada
             ctx.beginPath();
-            ctx.arc(p.x, p.y, 15, 0, Math.PI*2);
+            ctx.arc(p.x, p.y, plantSize, 0, Math.PI*2);
             ctx.fill();
             ctx.stroke();
 
@@ -487,7 +493,7 @@
             if (p.type === 'attacker') {
                 // Lógica de Disparo
                 if (now - p.lastShot > 800) {
-                    let target = state.enemies.find(en => Math.hypot(en.x - p.x, en.y - p.y) < p.range);
+                    let target = state.enemies.find(en => Math.hypot(en.x - p.x, en.y - p.y) < (p.range * scale));
                     if (target) {
                         state.projectiles.push({ x: p.x, y: p.y, tx: target.x, ty: target.y, age: 0 });
                         p.lastShot = now;
@@ -502,7 +508,8 @@
                     
                     // Efecto visual simple de producción
                     ctx.fillStyle = '#ffff00';
-                    ctx.fillText("+$" + p.value, p.x - 10, p.y - 20);
+                    ctx.font = (12 * scale) + 'px Arial';
+                    ctx.fillText("+$" + p.value, p.x - (10 * scale), p.y - (20 * scale));
                 }
             }
         });
@@ -529,7 +536,7 @@
 
             // Colisión con el jugador
             let distToPlayer = Math.hypot(state.player.x - en.x, state.player.y - en.y);
-            if (distToPlayer < 20 && state.health > 0) {
+            if (distToPlayer < (20 * scale) && state.health > 0) {
                 state.health -= 10;
                 state.enemies.splice(i, 1);
                 state.enemiesKilled++;
@@ -538,15 +545,16 @@
                 continue; 
             }
 
+            const enemySize = en.size * scale;
             ctx.fillStyle = en.isBoss ? '#880000' : (en.isStunner ? '#ff8800' : (en.isDestroyer ? '#5D4037' : (en.isShooter ? '#9C27B0' : '#ff3333')));
-            ctx.fillRect(en.x - en.size/2, en.y - en.size/2, en.size, en.size);
-            ctx.strokeRect(en.x - en.size/2, en.y - en.size/2, en.size, en.size);
+            ctx.fillRect(en.x - enemySize/2, en.y - enemySize/2, enemySize, enemySize);
+            ctx.strokeRect(en.x - enemySize/2, en.y - enemySize/2, enemySize, enemySize);
 
             // Colisión con plantas (para el paralizador y destructor)
             if (en.isStunner || en.isDestroyer) {
                 for (let pIdx = state.plants.length - 1; pIdx >= 0; pIdx--) {
                     let p = state.plants[pIdx];
-                    if (Math.hypot(p.x - en.x, p.y - en.y) < 25) {
+                    if (Math.hypot(p.x - en.x, p.y - en.y) < (25 * scale)) {
                         if (en.isStunner) {
                             p.stunUntil = Date.now() + 15000; // Paralizar por 15 segundos
                         } else if (en.isDestroyer) {
@@ -564,8 +572,8 @@
             // Vida del Jefe
             if (en.isBoss) {
                 ctx.fillStyle = 'white';
-                ctx.font = '12px Arial';
-                ctx.fillText("BOSS", en.x - 15, en.y - 30);
+                ctx.font = (12 * scale) + 'px Arial';
+                ctx.fillText("BOSS", en.x - (15 * scale), en.y - (30 * scale));
             }
         }
 
@@ -579,10 +587,10 @@
 
             ctx.fillStyle = '#ff00ff';
             ctx.beginPath();
-            ctx.arc(pr.x, pr.y, 5, 0, Math.PI*2);
+            ctx.arc(pr.x, pr.y, 5 * scale, 0, Math.PI*2);
             ctx.fill();
 
-            if (Math.hypot(pr.x - state.player.x, pr.y - state.player.y) < 20) {
+            if (Math.hypot(pr.x - state.player.x, pr.y - state.player.y) < (20 * scale)) {
                 state.health -= 5;
                 state.enemyProjectiles.splice(i, 1);
                 updateUI();
@@ -601,12 +609,12 @@
 
             ctx.fillStyle = '#ffff00';
             ctx.beginPath();
-            ctx.arc(pr.x, pr.y, 4, 0, Math.PI*2);
+            ctx.arc(pr.x, pr.y, 4 * scale, 0, Math.PI*2);
             ctx.fill();
 
             // Colisiones
             state.enemies.forEach((en, eIdx) => {
-                if (Math.hypot(pr.x - en.x, pr.y - en.y) < en.size) {
+                if (Math.hypot(pr.x - en.x, pr.y - en.y) < (en.size * scale)) {
                     en.hp--;
                     state.projectiles.splice(i, 1);
                     if (en.hp <= 0) {
